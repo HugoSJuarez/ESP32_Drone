@@ -3,8 +3,7 @@
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
-  int result=addTwoInts(10,2);
-  Serial.println(result);
+  ppmSetup(9, 3000);
 }
 
 void loop() {
