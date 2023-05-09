@@ -1,4 +1,4 @@
-#include "ppm_communicaton.h"
+#include "ppm_communication.h"
 
 int addTwoInts(int a, int b)
 {

@@ -1,8 +1,10 @@
-#include "../libraries/ppm_communication.h"
+#include "src/ppm_communication.h"
 
 void setup() {
   // put your setup code here, to run once:
-
+  Serial.begin(115200);
+  int result=addTwoInts(10,2);
+  Serial.println(result);
 }
 
 void loop() {
