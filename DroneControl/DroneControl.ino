@@ -5,6 +5,9 @@
 
 //Branch to try the PID controlls
 
+//Number of rotors 4 or 6
+byte rotorNumber=6;
+
 //LEDs Pin
 byte blueLED = 19;
 byte redLED = 23;
@@ -91,6 +94,8 @@ float t = 0.004;
 //Input of RC
 float desireRollRate;
 float desirePitchRate;
+float desireRollAngle;
+float desirePitchAngle;
 float desireYawRate;
 float desireThrottle;
 
@@ -129,6 +134,7 @@ void droneInitProtocol(void);
 void droneFlight(void);
 void droneMotorsOff(void);
 void droneMotorsIdle(void);
+void calibrateDrone(void);
 byte isDroneArmed(void);
 
 //BNO055 object
@@ -150,13 +156,15 @@ void setup() {
   }
   delay(1000);
   int8_t temp = myIMU.getTemp();
+  init_Calib_Values();
   myIMU.setExtCrystalUse(true);
+  waitPitchCorrect();
 
   //PPM setup
   myPPM.setup(9,3000);
   
   //Setting up motors
-  for(byte i=0; i<6; i++){
+  for(byte i=0; i<rotorNumber; i++){
     // Setting with a frquency of 250Hz and a resolution of 12bytes;
     ledcSetup(motorCh[i], 250, 12);
     ledcAttachPin(motorPin[i], motorCh[i]);
@@ -165,6 +173,8 @@ void setup() {
   waitRcConnect();
 
   droneInitProtocol();
+
+  //calibrateDrone();
 
   //Start loop timer
   loopTime = micros();
@@ -233,20 +243,25 @@ void resetPID(void){
   prevIRollRate=0;
   prevIPitchRate=0;
   prevIYawRate=0;
+
+  prevErrRollAngle=0;
+  prevErrPitchAngle=0;
+  prevIRollAngle=0;
+  prevIPitchAngle=0;
 }
 
 void droneFlight(void){
 
   //Get gyro info
   imu::Vector<3> gyr = myIMU.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
-  actualRollRate = -gyr.x();
+  actualRollRate = gyr.x();
   actualPitchRate = gyr.y();
   actualYawRate = -gyr.z();
 
   //Get angle info
   sensors_event_t event;
   myIMU.getEvent(&event);
-  actualRollAngle=event.orientation.z;
+  actualRollAngle=-event.orientation.z;
   actualPitchAngle=-event.orientation.y;
 
 
@@ -291,21 +306,26 @@ void droneFlight(void){
   //Check input throttle and apply a limitation
   if ( desireThrottle > 1800 ) desireThrottle = 1800;
   
-  inputMotor[0] = 1.024*(desireThrottle + rollRate - pitchRate - yawRate);
-  inputMotor[1] = 1.024*(desireThrottle + rollRate + yawRate);
-  inputMotor[2] = 1.024*(desireThrottle + rollRate + pitchRate - yawRate);
-  inputMotor[3] = 1.024*(desireThrottle - rollRate + pitchRate + yawRate);
-  inputMotor[4] = 1.024*(desireThrottle - rollRate - yawRate);
-  inputMotor[5] = 1.024*(desireThrottle - rollRate - pitchRate + yawRate);
-  
+  // //Hexacopter X
+  // inputMotor[0] = 1.024*(desireThrottle + rollRate - pitchRate - yawRate);
+  // inputMotor[1] = 1.024*(desireThrottle + rollRate + yawRate);
+  // inputMotor[2] = 1.024*(desireThrottle + rollRate + pitchRate - yawRate);
+  // inputMotor[3] = 1.024*(desireThrottle - rollRate + pitchRate + yawRate);
+  // inputMotor[4] = 1.024*(desireThrottle - rollRate - yawRate);
+  // inputMotor[5] = 1.024*(desireThrottle - rollRate - pitchRate + yawRate);
 
-  for (byte i=0; i<6; i++){
+  //Quadcopter  
+  inputMotor[0] = 1.024*(desireThrottle + rollRate - pitchRate - yawRate);
+  inputMotor[1] = 1.024*(desireThrottle + rollRate + pitchRate + yawRate);
+  inputMotor[2] = 1.024*(desireThrottle - rollRate + pitchRate - yawRate);
+  inputMotor[3] = 1.024*(desireThrottle - rollRate - pitchRate + yawRate);
+  
+//Change to number of rotors
+  for (byte i=0; i<rotorNumber; i++){
     if(inputMotor[i]>2000) inputMotor[i]=2000;
     //Adding idle
     if(inputMotor[i]<1180) inputMotor[i]=1180;
   }
-    Serial.print("Motor 3: ");
-    Serial.println(inputMotor[2]);
 
   //Adding noThrottle
   if(desireThrottle<1050){
@@ -314,7 +334,7 @@ void droneFlight(void){
   }
 
   //Send PWM signal to motors ESC
-  for(byte i=0; i<6; i++) ledcWrite(motorCh[i], inputMotor[i]);
+  for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], inputMotor[i]);
 };
 
 void waitRcConnect(void) {
@@ -345,12 +365,94 @@ void droneInitProtocol(void) {
 
 void droneMotorsOff(void){
   //Send PWM signal to motors ESC
-  for(byte i=0; i<6; i++) ledcWrite(motorCh[i], 1000);
+  for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], 1000);
 }
 
 void droneMotorsIdle(void){
   //Send PWM signal to motors ESC
-  for(byte i=0; i<6; i++) ledcWrite(motorCh[i], 1180);
+  for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], 1180);
+}
+
+void calibrateDrone(void){
+  //Calibration variables
+  uint8_t system, gyro, accel, mg = 0;
+  float lastSecond = millis();
+  //for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], 1.024*980);
+  myIMU.getCalibration(&system, &gyro, &accel, &mg);
+  redColor();
+  byte isRed = 1;
+  while (system!=3 || accel!=3){
+    //Send command to calibrate
+    myIMU.getCalibration(&system, &gyro, &accel, &mg);
+
+    Serial.print(", Calibration: ");
+    Serial.print(accel);
+    Serial.print(", ");
+    Serial.print(gyro);
+    Serial.print(", ");
+    Serial.print(mg);
+    Serial.print(", ");
+    Serial.println(system);
+    if(millis()-lastSecond>=500){
+      if(isRed==1){
+        noColor();
+        isRed=0;
+        }
+      else{
+        redColor();
+        isRed=1;
+      }
+      lastSecond = millis();
+    }
+  }
+  redColor();
+
+}
+
+void init_Calib_Values(void){
+  adafruit_bno055_offsets_t calibData;
+  calibData.accel_offset_x = 0;
+  calibData.accel_offset_y = 0; 
+  calibData.accel_offset_z = 0; 
+
+  calibData.gyro_offset_x = 16379; 
+  calibData.gyro_offset_y = -328; 
+  calibData.gyro_offset_z = 16379; 
+
+  calibData.mag_offset_x = 13589; 
+  calibData.mag_offset_y = -32755; 
+  calibData.mag_offset_z = 8064; 
+
+  calibData.accel_radius = 440;
+
+  calibData.mag_radius = 16380;
+  myIMU.setSensorOffsets(calibData);
+}
+
+
+void waitPitchCorrect(void){
+  float lastTimePitch = millis();
+  byte magenta = 1;
+  int timesCorrect = 0;
+  while(timesCorrect<200){
+    imu::Vector<3> gyr = myIMU.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+    Serial.print(gyr.y());
+    Serial.print(", ");
+    Serial.println(timesCorrect);
+    if(gyr.y()<1 && gyr.y()>-1)timesCorrect++;
+    if(millis()-lastTimePitch>=500){
+      if(magenta){
+        noColor();
+        magenta=0;
+      }
+      else{
+        magentaColor();
+        magenta = 1;
+      }
+      lastTimePitch=millis();
+    }
+    delay(100);
+  };
 }
 
 byte isDroneArmed(void){
