@@ -3,22 +3,28 @@
 #include <Adafruit_BNO055.h>
 #include <utility/imumaths.h>
 
-//Branch to try the PID controlls
+//                Flight Mode
 
-//Number of rotors 4 or 6
-byte rotorNumber=6;
+byte rotorNumber = 6;
 
-//LEDs Pin
+//Number of motors inputs
+float inputMotor[6];
+
+//Motor pins and channel
+byte motorPin[6] = { 25, 26, 27, 18, 5, 10};
+byte motorCh[6] = { 0, 1, 2, 3, 4, 5 };
+
+//                LEDs Pin
 byte blueLED = 19;
 byte redLED = 23;
 
-//LED Prototype functions
+//                LED Prototype functions
 void noColor(void);
 void redColor(void);
 void blueColor(void);
 void magentaColor(void);
 
-//Drone initialization variables
+//                Drone initialization variables
 byte droneInit = 0;
 byte onceUp = 0;
 byte onceDown = 0;
@@ -26,44 +32,34 @@ byte armed = 0;
 byte connectionLost = 0;
 
 //                Rate Controller
-//PID outputs
+//PID outputs Rate °/s
 float rollRate;
 float pitchRate;
 float yawRate;
 
-//PID for Roll
-// float kpRollRate = 0.6;
-// float kiRollRate = 0;
-// float kdRollRate = 0;
-
-// float kpRollRate = 3;
-// float kiRollRate = 0.048;
-// float kdRollRate = 2;
-
-float kpRollRate = 1.35*0.6;
+//PID for Roll Rate °/s
+float kpRollRate = 1*0.6;
 float kiRollRate = 0.0325/0.004;
 float kdRollRate = 0.004/9;
+// float kpRollRate = 2.5*0.6;
+// float kiRollRate = 0.0325/0.004;
+// float kdRollRate = 0.004/9;
 
-// float kpRollRate = 1.3*0.6; ESTE
-// float kiRollRate = 0.0275/0.004; ESTE
-// float kdRollRate = 0.004/9; ESTE
-//PID for Pitch
-// float kpPitchRate = 0.6;
-// float kiPitchRate = 3.5;
-// float kdPitchRate = 0.03;
-float kpPitchRate = 1.35*0.6;
+//PID for Pitch Rate °/s
+float kpPitchRate = 1*0.6;
 float kiPitchRate = 0.0325/0.004;
 float kdPitchRate = 0.004/9;
+// float kpPitchRate = 2.5*0.6;
+// float kiPitchRate = 0.0325/0.004;
+// float kdPitchRate = 0.004/9;
 
-//PID for Yaw
+
+//PID for Yaw Rate °/s
 float kpYawRate = 2;
 float kiYawRate = 12;
 float kdYawRate = 0;
-// float kpYawRate = 0.6;
-// float kiYawRate = 0.02;
-// float kdYawRate = 0.2;
 
-//Errors
+//Errors Rate °/s
 float errRollRate;
 float errPitchRate;
 float errYawRate;
@@ -71,50 +67,41 @@ float prevErrRollRate = 0;
 float prevErrPitchRate = 0;
 float prevErrYawRate = 0;
 
-//Previous I values
+//Previous I values Rate °/s
 float prevIRollRate = 0;
 float prevIPitchRate = 0;
 float prevIYawRate = 0;
 
 //            Angle Controller
-//PID outputs
+//PID outputs Angle °
 float rollAngle;
 float pitchAngle;
 //Yaw wont be taken in consideration cause once yaw is put, i dont want the drone to return to 0
 
-//PID for Roll
+//PID for Roll Angle °
 float kpRollAngle = 2;
 float kiRollAngle = 0;
 float kdRollAngle = 0;
-// float kpRollAngle = 0.8;
-// float kiRollAngle = 0.01;
-// float kdRollAngle = 0.2;
 
-
-//PID for Pitch
+//PID for Pitch Angle °
 float kpPitchAngle = 2;
 float kiPitchAngle = 0;
 float kdPitchAngle = 0;
-// float kpPitchAngle = 0.8;
-// float kiPitchAngle = 0.01;
-// float kdPitchAngle = 0.2;
 
-//Errors
+//Errors Angle °
 float errRollAngle;
 float errPitchAngle;
 float prevErrRollAngle = 0;
 float prevErrPitchAngle = 0;
 
-//Previous I values
+//Previous I values Angle °
 float prevIRollAngle = 0;
 float prevIPitchAngle = 0;
 
-
-//------------------------
 //Time between new PID
 float t = 0.004;
 
-//Input of RC
+//            Input of RC
 float desireRollRate;
 float desirePitchRate;
 float desireRollAngle;
@@ -124,36 +111,31 @@ float desireThrottle;
 
 float pastRollAngle;
 
-//Input from BNO055 sensor
-//Angle
+//             Input from BNO055 sensor
+
+// Class for BNO055 usage
+Adafruit_BNO055 myIMU = Adafruit_BNO055();
+
+// Angle °
 float actualRollAngle;
 float actualPitchAngle;
 
-//Rate
+// Rate  °/s
 float actualRollRate;
 float actualPitchRate;
 float actualYawRate;
 
-// float desireThrottle; Need to be implemented with barometer
-
-//Motors input
-float inputMotor[6];
-
-//Motor pins and channel
-byte motorPin[6] = { 25, 26, 27, 18, 5, 10};
-byte motorCh[6] = { 0, 1, 2, 3, 4, 5 };
-
-//Initiliazation PPM reader
+//             Initiliazation PPM reader
 PPM myPPM = PPM();
 
-//Time in Micro for loop to restart
+//             Time in Micro for loop to restart
 float loopTime;
 
-//Prototypes functions PID
+//             Prototypes functions PID
 void PIDControll(float &orientation, float &err, float &prevErr, float &prevI, float &Kp, float &Ki, float &Kd, float t);
 void resetPID(void);
 
-//State functions prototypes
+//             Drone State functions prototypes
 void waitRcConnect(void);
 void droneInitProtocol(void);
 void droneFlight(void);
@@ -162,10 +144,6 @@ void droneMotorsIdle(void);
 void calibrateDrone(void);
 byte isDroneArmed(void);
 
-//BNO055 object
-//Default SCL Pin in ESP32 GPIO 22
-//Default SDA Pin in ESP32 GPIO 21
-Adafruit_BNO055 myIMU = Adafruit_BNO055();
 
 void setup() {
 
@@ -194,15 +172,12 @@ void setup() {
     ledcAttachPin(motorPin[i], motorCh[i]);
   }
 
-  for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], 990);
+  //First time drone is powered it will set all motors off
+  droneMotorsOff();
 
-  // calibrateDrone();
-  
+  //Intialization Protocol for safety
   waitRcConnect();
-
   droneInitProtocol();
-
-  
 
   //Start loop timer
   loopTime = micros();
@@ -289,130 +264,73 @@ void resetPID(void){
 
 void droneFlight(void){
 
-  //Get gyro info
+  //Get gyro info from BNO055
   imu::Vector<3> gyr = myIMU.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
   actualRollRate = gyr.x();
   actualPitchRate = gyr.y();
   actualYawRate = -gyr.z();
 
-  //Get angle info
+  //Get angle info from BNO055
   sensors_event_t event;
   myIMU.getEvent(&event);
   actualRollAngle=-event.orientation.z;
   actualPitchAngle=-event.orientation.y;
 
-  Serial.print("Actual Roll: Deg: ");
-  Serial.print(actualRollAngle);
-  Serial.print("errRoll: Deg: ");
-  Serial.print(errRollAngle);
-  Serial.print("prevErrRollAngle: ");
-  Serial.print(prevErrRollAngle);
-  Serial.print("prevIRollAngle: ");
-  Serial.print(prevIRollAngle);
-  
-  
-  // Serial.print(", Pitch: Deg: ");
-  // Serial.print(actualPitchAngle);
-  // Serial.print("°/s: ");
-  // Serial.print(actualPitchRate);
-  // Serial.print("Yaw: °/s: ");
-  // Serial.print(actualYawRate);
-
+  //Getting desire rates °/s base on inputs
   desireThrottle = (float)myPPM.ch[1];
   desireYawRate = 0.15*((float)myPPM.ch[4]-1500);
+  Serial.print("Yaw: ");
+  Serial.println(desireYawRate);
 
-  //              Getting desire angles
+  //Getting desire angles ° base on controller inputs
   desireRollAngle = 0.1*((float)myPPM.ch[2]-1500);
   desirePitchAngle = 0.1*((float)myPPM.ch[3]-1500);
-
-  Serial.print("Desire Roll Channel: ");
-  Serial.print(myPPM.ch[2]);
-  Serial.print("us ,Desire Roll: ");
-  Serial.print(desireRollAngle);
-  // errRollAngle = desireRollAngle - actualRollAngle;
+  
+  //Get error for Angles °
   errRollAngle = desireRollAngle-actualRollAngle;
   errPitchAngle = desirePitchAngle - actualPitchAngle;
 
+  //Calculate PID for Angles °
   PIDControll( rollAngle, errRollAngle, prevErrRollAngle, prevIRollAngle, kpRollAngle, kiRollAngle, kdRollAngle, t);
   PIDControll( pitchAngle, errPitchAngle, prevErrPitchAngle, prevIPitchAngle, kpPitchAngle, kiPitchAngle, kdPitchAngle, t);
 
+  //Save the output of the PID for Angles ° as the input for the PID of Rates °/s
   desireRollRate = rollAngle;
   desirePitchRate = pitchAngle;
 
-  // desireRollRate = 0.1*myPPM.ch[2]-150;
-  // desirePitchRate= 0.1*myPPM.ch[3]-150;
-
-
-
-  //Check inputs
-  // Serial.print("Throttle: ");
-  // Serial.print(desireThrottle);
-  // Serial.print(" , Roll: ");
-  // Serial.print(desireRollRate);
-  // Serial.print(" , Pitch: ");
-  // Serial.print(desirePitchRate);
-  // Serial.print(" , Yaw: ");
-  // Serial.println(desireYawRate);
-
-  //Get error
+  //Get error for Rate °/s
   errRollRate = desireRollRate - actualRollRate;
   errPitchRate = desirePitchRate - actualPitchRate;
   errYawRate = desireYawRate - actualYawRate;
-  Serial.print("Desire Roll Rate: ");
-  Serial.print(desireRollRate);
-  Serial.print("Actual Roll °/s: ");
-  Serial.print(actualRollRate);
-  Serial.print("errRoll: °/s");
-  Serial.print(errRollRate);
-  Serial.print("prevErrRollRate: ");
-  Serial.print(prevErrRollRate);
-  Serial.print("prevIRollRate: ");
-  Serial.print(prevIRollRate);
   
-  //Calculate PID
+  //Calculate PID for Rate °/s
   PIDControll( rollRate, errRollRate, prevErrRollRate, prevIRollRate, kpRollRate, kiRollRate, kdRollRate, t);
   PIDControll( pitchRate, errPitchRate, prevErrPitchRate, prevIPitchRate, kpPitchRate, kiPitchRate, kdPitchRate, t);
   PIDControll( yawRate, errYawRate, prevErrYawRate, prevIYawRate, kpYawRate, kiYawRate, kdYawRate, t);
-  
-  
-  // Serial.print(", errPitch: Deg: ");
-  // Serial.print(errPitchAngle);
-  // Serial.print("°/s: ");
-  // Serial.print(errPitchRate);
-  // Serial.print("errYaw: °/s: ");
-  // Serial.print(errYawRate);
 
-  Serial.print(", rollRate: ");
-  Serial.print(rollRate);
-  // Serial.print(", pitchRate: ");
-  // Serial.print(pitchRate);
-  // Serial.print(", yawRate: ");
-  // Serial.print(yawRate);
-
-  //Check input throttle and apply a limitation
+  //Check input throttle and apply a limitation 
   if ( desireThrottle > 1500 ) desireThrottle = 1500;
   
-  // //Hexacopter X
-  inputMotor[0] = 1.024*(desireThrottle - rollRate - pitchRate - yawRate);
-  inputMotor[1] = 1.024*(desireThrottle - rollRate + yawRate);
+  //Hexacopter X
+  if(rotorNumber == 6){
   
-  inputMotor[2] = 1.024*(desireThrottle - rollRate + pitchRate - yawRate + 150);
-  
-  inputMotor[3] = 1.024*(desireThrottle + rollRate + pitchRate + yawRate);
-  inputMotor[4] = 1.024*(desireThrottle + rollRate - yawRate);
-  inputMotor[5] = 1.024*(desireThrottle + rollRate - pitchRate + yawRate);
+    inputMotor[0] = 1.024*(desireThrottle - rollRate - pitchRate - yawRate);
+    inputMotor[1] = 1.024*(desireThrottle - rollRate + yawRate);
+    inputMotor[2] = 1.024*(desireThrottle - rollRate + pitchRate - yawRate);
+    inputMotor[3] = 1.024*(desireThrottle + rollRate + pitchRate + yawRate);
+    inputMotor[4] = 1.024*(desireThrottle + rollRate - yawRate) + 132;
+    inputMotor[5] = 1.024*(desireThrottle + rollRate - pitchRate + yawRate);
+  }
 
-  //Quadcopter  
-  // inputMotor[0] = 1.024*(desireThrottle - rollRate - pitchRate + yawRate);
-  // inputMotor[1] = 1.024*(desireThrottle - rollRate + pitchRate - yawRate);
-  // inputMotor[2] = 1.024*(desireThrottle + rollRate + pitchRate + yawRate);
-  // inputMotor[3] = 1.024*(desireThrottle + rollRate - pitchRate - yawRate);
+  //Quadcopter X
+  else if (rotorNumber == 4) {
+    inputMotor[0] = 1.024*(desireThrottle - rollRate - pitchRate + yawRate);
+    inputMotor[1] = 1.024*(desireThrottle - rollRate + pitchRate - yawRate);
+    inputMotor[2] = 1.024*(desireThrottle + rollRate + pitchRate + yawRate);
+    inputMotor[3] = 1.024*(desireThrottle + rollRate - pitchRate - yawRate);
+  }
 
-  
-
-
-  
-//Change to number of rotors
+  //Check if the output is the min or max and limitate it
   for (byte i=0; i<rotorNumber; i++){
     if(inputMotor[i]>2000) inputMotor[i]=2000;
     //Adding idle
@@ -425,21 +343,10 @@ void droneFlight(void){
     resetPID();
   }
   
-  Serial.print("Motores: ");
-  Serial.print(", Motor 2: ");
-  Serial.print(inputMotor[1]);
-  Serial.print(", Motor 5: ");
-  Serial.println(inputMotor[4]);
-  // Serial.print(", Motor 3: ");
-  // Serial.print(inputMotor[2]);
-  // Serial.print(", Motor 4: ");
-  // Serial.println(inputMotor[3]);
-
-  // inputMotor[0] = 1000;
-  // inputMotor[2] = 1000;
-  // inputMotor[3] = 1000;
-  // inputMotor[5] = 1000;
-  
+  // inputMotor[0] = 990;
+  // inputMotor[2] = 990;
+  // inputMotor[3] = 990;
+  // inputMotor[5] = 990;
   //Send PWM signal to motors ESC
   for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], inputMotor[i]);
   // for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], desireThrottle);
@@ -447,7 +354,6 @@ void droneFlight(void){
 
 void waitRcConnect(void) {
   while(!myPPM.oneRead){
-    Serial.println("Waiting for RC ...");
     digitalWrite(redLED, LOW);
     digitalWrite(blueLED, LOW);
     delay(500);
@@ -455,6 +361,7 @@ void waitRcConnect(void) {
 }
 
 void droneInitProtocol(void) {
+  //Protocol indicate first time drone powers up, you have to disarm it and then take the throttle up and down for it to allow activation
   while(!droneInit){
     if(myPPM.ch[5]<1100){
       if(!onceUp && myPPM.ch[1]>1900) onceUp = 1;
@@ -472,20 +379,96 @@ void droneInitProtocol(void) {
 }
 
 void droneMotorsOff(void){
-  //Send PWM signal to motors ESC
-  for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], 1000);
+  //Send the min for motors to not move
+  for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], 990);
 }
 
 void droneMotorsIdle(void){
+  
+  //Get gyro info from BNO055
+  imu::Vector<3> gyr = myIMU.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+  actualRollRate = gyr.x();
+  actualPitchRate = gyr.y();
+  actualYawRate = -gyr.z();
+
+  //Get angle info from BNO055
+  sensors_event_t event;
+  myIMU.getEvent(&event);
+  actualRollAngle=-event.orientation.z;
+  actualPitchAngle=-event.orientation.y;
+
+  //Getting desire rates °/s base on inputs
+  desireThrottle = (float)1300;
+  desireYawRate = (float)0;
+
+  //Getting desire angles ° base on controller inputs
+  desireRollAngle = (float)0;
+  desirePitchAngle = (float)0;
+  
+  //Get error for Angles °
+  errRollAngle = desireRollAngle-actualRollAngle;
+  errPitchAngle = desirePitchAngle - actualPitchAngle;
+
+  //Calculate PID for Angles °
+  PIDControll( rollAngle, errRollAngle, prevErrRollAngle, prevIRollAngle, kpRollAngle, kiRollAngle, kdRollAngle, t);
+  PIDControll( pitchAngle, errPitchAngle, prevErrPitchAngle, prevIPitchAngle, kpPitchAngle, kiPitchAngle, kdPitchAngle, t);
+
+  //Save the output of the PID for Angles ° as the input for the PID of Rates °/s
+  desireRollRate = rollAngle;
+  desirePitchRate = pitchAngle;
+
+  //Get error for Rate °/s
+  errRollRate = desireRollRate - actualRollRate;
+  errPitchRate = desirePitchRate - actualPitchRate;
+  errYawRate = desireYawRate - actualYawRate;
+  
+  //Calculate PID for Rate °/s
+  PIDControll( rollRate, errRollRate, prevErrRollRate, prevIRollRate, kpRollRate, kiRollRate, kdRollRate, t);
+  PIDControll( pitchRate, errPitchRate, prevErrPitchRate, prevIPitchRate, kpPitchRate, kiPitchRate, kdPitchRate, t);
+  PIDControll( yawRate, errYawRate, prevErrYawRate, prevIYawRate, kpYawRate, kiYawRate, kdYawRate, t);
+
+  //Check input throttle and apply a limitation 
+  if ( desireThrottle > 1500 ) desireThrottle = 1500;
+  
+  //Hexacopter X
+  if(rotorNumber == 6){
+  
+    inputMotor[0] = 1.024*(desireThrottle - rollRate - pitchRate - yawRate);
+    inputMotor[1] = 1.024*(desireThrottle - rollRate + yawRate);
+    inputMotor[2] = 1.024*(desireThrottle - rollRate + pitchRate - yawRate + 150);
+    inputMotor[3] = 1.024*(desireThrottle + rollRate + pitchRate + yawRate);
+    inputMotor[4] = 1.024*(desireThrottle + rollRate - yawRate);
+    inputMotor[5] = 1.024*(desireThrottle + rollRate - pitchRate + yawRate);
+  }
+
+  //Quadcopter X
+  else if (rotorNumber == 4) {
+    inputMotor[0] = 1.024*(desireThrottle - rollRate - pitchRate + yawRate);
+    inputMotor[1] = 1.024*(desireThrottle - rollRate + pitchRate - yawRate);
+    inputMotor[2] = 1.024*(desireThrottle + rollRate + pitchRate + yawRate);
+    inputMotor[3] = 1.024*(desireThrottle + rollRate - pitchRate - yawRate);
+  }
+
+  //Check if the output is the min or max and limitate it
+  for (byte i=0; i<rotorNumber; i++){
+    if(inputMotor[i]>2000) inputMotor[i]=2000;
+    //Adding idle
+    if(inputMotor[i]<1050) inputMotor[i]=1050;
+  }
+
+  //Adding noThrottle
+  if(desireThrottle<1050){
+    for (byte i=0; i<6; i++) inputMotor[i]=1000;
+    resetPID();
+  }  
   //Send PWM signal to motors ESC
-  for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], 1050);
+  for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], inputMotor[i]);
 }
 
 void calibrateDrone(void){
   //Calibration variables
   uint8_t system, gyro, accel, mg = 0;
   float lastSecond = millis();
-  //for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], 1.024*980);
   myIMU.getCalibration(&system, &gyro, &accel, &mg);
   magentaColor();
   byte isMagenta = 1;
@@ -493,17 +476,6 @@ void calibrateDrone(void){
     //Send command to calibrate
     myIMU.getCalibration(&system, &gyro, &accel, &mg);
     imu::Vector<3> accele = myIMU.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
-    Serial.print(accele.x());
-    Serial.print(accele.y());
-    Serial.print(accele.z());
-    Serial.print(", Calibration: ");
-    Serial.print(accel);
-    Serial.print(", ");
-    Serial.print(gyro);
-    Serial.print(", ");
-    Serial.print(mg);
-    Serial.print(", ");
-    Serial.println(system);
     if(millis()-lastSecond>=500){
       if(isMagenta==1){
         noColor();
@@ -539,32 +511,6 @@ void init_Calib_Values(void){
   calibData.mag_radius = 23592;
 
   myIMU.setSensorOffsets(calibData);
-}
-
-
-void waitPitchCorrect(void){
-  float lastTimePitch = millis();
-  byte magenta = 1;
-  int timesCorrect = 0;
-  while(timesCorrect<50){
-    imu::Vector<3> gyr = myIMU.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
-    Serial.print(gyr.y());
-    Serial.print(", ");
-    Serial.println(timesCorrect);
-    if(gyr.y()<1 && gyr.y()>-1)timesCorrect++;
-    if(millis()-lastTimePitch>=500){
-      if(magenta){
-        noColor();
-        magenta=0;
-      }
-      else{
-        magentaColor();
-        magenta = 1;
-      }
-      lastTimePitch=millis();
-    }
-    delay(100);
-  };
 }
 
 byte isDroneArmed(void){
