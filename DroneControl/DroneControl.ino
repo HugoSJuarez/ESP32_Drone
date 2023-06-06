@@ -2,6 +2,48 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
 #include <utility/imumaths.h>
+#include <MS5611.h>
+
+//Kalman Filter for Altitude
+#include <BasicLinearAlgebra.h>
+using namespace BLA;
+float altitudeK;
+float velocityK;
+BLA::Matrix<2,2> F;
+BLA::Matrix<2,1> G;
+BLA::Matrix<2,2> P;
+BLA::Matrix<2,2> Q;
+BLA::Matrix<2,1> S;
+BLA::Matrix<1,2> H;
+BLA::Matrix<2,2> I;
+BLA::Matrix<1,1> accK;
+BLA::Matrix<2,1> K;
+BLA::Matrix<1,1> R;
+BLA::Matrix<1,1> L;
+BLA::Matrix<1,1> M;
+
+void kelmanInitValues(void);
+void kalmanAltitude(void);
+
+//                Barometer sensor
+MS5611 MS5611(0x77);
+
+float altitudeAtFloor=0;
+float altitude;
+float accZVert;
+
+float kpVelAltitude = 3.5;
+float kiVelAltitude = 0.0015;
+float kdVelAltitude = 0.01;
+
+float errVelAltitude;
+float prevErrVelAltitude=0;
+float prevIVelAltitude=0;
+
+void getAltitudeReferenceLevel(void);
+float getAltitude(void);
+void getAccZVert(void);
+
 
 //                Flight Mode
 
@@ -107,7 +149,9 @@ float desirePitchRate;
 float desireRollAngle;
 float desirePitchAngle;
 float desireYawRate;
-float desireThrottle;
+
+float velAltitude;
+float desireVelAltitude;
 
 float pastRollAngle;
 
@@ -147,6 +191,7 @@ byte isDroneArmed(void);
 
 void setup() {
 
+
   //Setting RGB Leds
   pinMode(blueLED, OUTPUT);
   pinMode(redLED, OUTPUT);
@@ -155,6 +200,10 @@ void setup() {
   Serial.begin(115200);
   if( !myIMU.begin() ){
     Serial.print("BNO055 not Found, check connection!");
+    while(1);
+  }
+  if( !MS5611.begin()){
+    Serial.print("MS5611 not Found, check connection!");
     while(1);
   }
   delay(1000);
@@ -172,6 +221,12 @@ void setup() {
     ledcAttachPin(motorPin[i], motorCh[i]);
   }
 
+  //Barometer setup
+  getAltitudeReferenceLevel();
+
+  //Kelman Setup
+  kelmanInitValues();
+
   //First time drone is powered it will set all motors off
   droneMotorsOff();
 
@@ -184,7 +239,7 @@ void setup() {
 }
 
 void loop() {
-  
+
   if ( isDroneArmed() && !isConnectionLost()){
     blueColor();
     droneFlight();
@@ -260,6 +315,9 @@ void resetPID(void){
   prevErrPitchAngle=0;
   prevIRollAngle=0;
   prevIPitchAngle=0;
+
+  prevErrVelAltitude=0;
+  prevIVelAltitude=0;
 }
 
 void droneFlight(void){
@@ -276,11 +334,31 @@ void droneFlight(void){
   actualRollAngle=-event.orientation.z;
   actualPitchAngle=-event.orientation.y;
 
+  //Get acc in vertical Z
+  getAccZVert();
+
+  //Getting altitude
+  altitude = getAltitude()-altitudeAtFloor;
+  Serial.print("Altitude [cm]: ");
+  Serial.print(altitude);
+
+  //Running Kelman Filter
+  kalmanAltitude();
+
+  Serial.print("Altitude [cm]: ");
+  Serial.print(altitudeK);
+  Serial.print("Vertical velocity [cm/s]: ");
+  Serial.print(velocityK);
+
+
+  //Getting desire velAltitude
+  desireVelAltitude=0.3*(myPPM.ch[1]-1500);
+  errVelAltitude=desireVelAltitude-velocityK;
+  PIDControll(velAltitude, errVelAltitude, prevErrVelAltitude, prevIVelAltitude, kpVelAltitude, kiVelAltitude, kdVelAltitude, t);
+  velAltitude += 1500;
+  
   //Getting desire rates °/s base on inputs
-  desireThrottle = (float)myPPM.ch[1];
   desireYawRate = 0.15*((float)myPPM.ch[4]-1500);
-  Serial.print("Yaw: ");
-  Serial.println(desireYawRate);
 
   //Getting desire angles ° base on controller inputs
   desireRollAngle = 0.1*((float)myPPM.ch[2]-1500);
@@ -309,25 +387,25 @@ void droneFlight(void){
   PIDControll( yawRate, errYawRate, prevErrYawRate, prevIYawRate, kpYawRate, kiYawRate, kdYawRate, t);
 
   //Check input throttle and apply a limitation 
-  if ( desireThrottle > 1500 ) desireThrottle = 1500;
+  if ( velAltitude > 1500 ) velAltitude = 1500;
   
   //Hexacopter X
   if(rotorNumber == 6){
   
-    inputMotor[0] = 1.024*(desireThrottle - rollRate - pitchRate - yawRate);
-    inputMotor[1] = 1.024*(desireThrottle - rollRate + yawRate);
-    inputMotor[2] = 1.024*(desireThrottle - rollRate + pitchRate - yawRate);
-    inputMotor[3] = 1.024*(desireThrottle + rollRate + pitchRate + yawRate);
-    inputMotor[4] = 1.024*(desireThrottle + rollRate - yawRate) + 132;
-    inputMotor[5] = 1.024*(desireThrottle + rollRate - pitchRate + yawRate);
+    inputMotor[0] = 1.024*(velAltitude - rollRate - pitchRate - yawRate);
+    inputMotor[1] = 1.024*(velAltitude - rollRate + yawRate);
+    inputMotor[2] = 1.024*(velAltitude - rollRate + pitchRate - yawRate);
+    inputMotor[3] = 1.024*(velAltitude + rollRate + pitchRate + yawRate);
+    inputMotor[4] = 1.024*(velAltitude + rollRate - yawRate) + 132;
+    inputMotor[5] = 1.024*(velAltitude + rollRate - pitchRate + yawRate);
   }
 
   //Quadcopter X
   else if (rotorNumber == 4) {
-    inputMotor[0] = 1.024*(desireThrottle - rollRate - pitchRate + yawRate);
-    inputMotor[1] = 1.024*(desireThrottle - rollRate + pitchRate - yawRate);
-    inputMotor[2] = 1.024*(desireThrottle + rollRate + pitchRate + yawRate);
-    inputMotor[3] = 1.024*(desireThrottle + rollRate - pitchRate - yawRate);
+    inputMotor[0] = 1.024*(velAltitude - rollRate - pitchRate + yawRate);
+    inputMotor[1] = 1.024*(velAltitude - rollRate + pitchRate - yawRate);
+    inputMotor[2] = 1.024*(velAltitude + rollRate + pitchRate + yawRate);
+    inputMotor[3] = 1.024*(velAltitude + rollRate - pitchRate - yawRate);
   }
 
   //Check if the output is the min or max and limitate it
@@ -338,7 +416,7 @@ void droneFlight(void){
   }
 
   //Adding noThrottle
-  if(desireThrottle<1050){
+  if(velAltitude<1050){
     for (byte i=0; i<6; i++) inputMotor[i]=1000;
     resetPID();
   }
@@ -349,7 +427,7 @@ void droneFlight(void){
   // inputMotor[5] = 990;
   //Send PWM signal to motors ESC
   for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], inputMotor[i]);
-  // for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], desireThrottle);
+  // for(byte i=0; i<rotorNumber; i++) ledcWrite(motorCh[i], velAltitude);
 };
 
 void waitRcConnect(void) {
@@ -398,7 +476,7 @@ void droneMotorsIdle(void){
   actualPitchAngle=-event.orientation.y;
 
   //Getting desire rates °/s base on inputs
-  desireThrottle = (float)1300;
+  velAltitude = (float)1300;
   desireYawRate = (float)0;
 
   //Getting desire angles ° base on controller inputs
@@ -428,25 +506,25 @@ void droneMotorsIdle(void){
   PIDControll( yawRate, errYawRate, prevErrYawRate, prevIYawRate, kpYawRate, kiYawRate, kdYawRate, t);
 
   //Check input throttle and apply a limitation 
-  if ( desireThrottle > 1500 ) desireThrottle = 1500;
+  if ( velAltitude > 1500 ) velAltitude = 1500;
   
   //Hexacopter X
   if(rotorNumber == 6){
   
-    inputMotor[0] = 1.024*(desireThrottle - rollRate - pitchRate - yawRate);
-    inputMotor[1] = 1.024*(desireThrottle - rollRate + yawRate);
-    inputMotor[2] = 1.024*(desireThrottle - rollRate + pitchRate - yawRate + 150);
-    inputMotor[3] = 1.024*(desireThrottle + rollRate + pitchRate + yawRate);
-    inputMotor[4] = 1.024*(desireThrottle + rollRate - yawRate);
-    inputMotor[5] = 1.024*(desireThrottle + rollRate - pitchRate + yawRate);
+    inputMotor[0] = 1.024*(velAltitude - rollRate - pitchRate - yawRate);
+    inputMotor[1] = 1.024*(velAltitude - rollRate + yawRate);
+    inputMotor[2] = 1.024*(velAltitude - rollRate + pitchRate - yawRate + 150);
+    inputMotor[3] = 1.024*(velAltitude + rollRate + pitchRate + yawRate);
+    inputMotor[4] = 1.024*(velAltitude + rollRate - yawRate);
+    inputMotor[5] = 1.024*(velAltitude + rollRate - pitchRate + yawRate);
   }
 
   //Quadcopter X
   else if (rotorNumber == 4) {
-    inputMotor[0] = 1.024*(desireThrottle - rollRate - pitchRate + yawRate);
-    inputMotor[1] = 1.024*(desireThrottle - rollRate + pitchRate - yawRate);
-    inputMotor[2] = 1.024*(desireThrottle + rollRate + pitchRate + yawRate);
-    inputMotor[3] = 1.024*(desireThrottle + rollRate - pitchRate - yawRate);
+    inputMotor[0] = 1.024*(velAltitude - rollRate - pitchRate + yawRate);
+    inputMotor[1] = 1.024*(velAltitude - rollRate + pitchRate - yawRate);
+    inputMotor[2] = 1.024*(velAltitude + rollRate + pitchRate + yawRate);
+    inputMotor[3] = 1.024*(velAltitude + rollRate - pitchRate - yawRate);
   }
 
   //Check if the output is the min or max and limitate it
@@ -457,7 +535,7 @@ void droneMotorsIdle(void){
   }
 
   //Adding noThrottle
-  if(desireThrottle<1050){
+  if(velAltitude<1050){
     for (byte i=0; i<6; i++) inputMotor[i]=1000;
     resetPID();
   }  
@@ -513,6 +591,54 @@ void init_Calib_Values(void){
   myIMU.setSensorOffsets(calibData);
 }
 
+void kelmanInitValues(void){
+  //Initial Values
+  F={1, 0.004, 0, 1};
+  G={0.5*0.004*0.004, 0.004};
+  H={1,0};
+  I={1, 0, 0, 1};
+  Q=G*~G*10*10;
+  R={30*30};
+  P={0, 0, 0, 0};
+  S={0, 0};
+}
+
+void kalmanAltitude(void){
+  accK={accZVert};
+  S=F*S+G*accK;
+  P=F*P*~F+Q;
+  L=H*P*~H+R;
+  K=P*~H*Invert(L);
+  M={altitude};
+  S=S+K*(M-H*S);
+  altitudeK=S(0,0);
+  velocityK=S(1,0);
+  P=(I-K*H)*P;
+}
+
+void getAccZVert(void){
+  imu::Vector<3> acc = myIMU.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
+  //Checar que esten del lado correcto
+  float accX=acc.x();
+  float accY=acc.y();
+  float accZ=acc.z();
+  accZVert=-accX*sin(actualPitchAngle)+accY*cos(actualPitchAngle)*sin(actualRollAngle)+accZ*cos(actualPitchAngle)*cos(actualRollAngle);
+  //Convert to cm/s^2
+  accZVert=(accZVert-1)*9.81*100;
+}
+
+void getAltitudeReferenceLevel(void){
+  for(int i=0; i<2000; i++){
+    altitudeAtFloor+=getAltitude();
+    delay(1);
+  }
+  altitudeAtFloor /=2000;
+}
+
+float getAltitude(void) {
+  return 44330*(1-pow(MS5611.getPressure()/1013.25,1/5.255))*100;
+}
+
 byte isDroneArmed(void){
   if (!armed && myPPM.ch[5]>1500 && myPPM.ch[1]<1100) armed = 1;
   else if(armed && myPPM.ch[5]<1500) armed = 0;
@@ -528,3 +654,5 @@ byte isConnectionLost(void){
   }
   return connectionLost;
 }
+
+
